@@ -52,6 +52,8 @@ fn run(oid: Oid, size: u8) -> Result<(), git2::Error> {
     // Compare the index against the specified commit's tree
     let diff = repo.diff_tree_to_index(Some(&tree), Some(&index), None)?;
 
+    let mut flag = true;
+
     // Iterate over differences
     diff.foreach(
         &mut |delta, _progress| {
@@ -71,6 +73,7 @@ fn run(oid: Oid, size: u8) -> Result<(), git2::Error> {
                 println!("Old Size: {} MB", old_size);
                 println!("New Size: {} MB", new_size);
                 println!("Net Change: {} MB", net_change);
+                flag = false;
             }
 
             // You can implement additional logic to compare sizes or other attributes here
@@ -80,6 +83,10 @@ fn run(oid: Oid, size: u8) -> Result<(), git2::Error> {
         None,
         None,
     )?;
+
+    if !flag {
+        return Err(git2::Error::from_str("File size exceeds tolerance"));
+    }
 
     Ok(())
 }
