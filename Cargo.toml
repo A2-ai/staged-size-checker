@@ -9,3 +9,4 @@ edition = "2021"
 
 clap = { version = "4.5.4", features = ["derive"] }
 git2 = "0.18.3"
+parse-size = "1.0.0"

@@ -1,5 +1,6 @@
 use clap::Parser;
 use git2::{Oid, Repository};
+use parse_size::parse_size;
 use std::path::Path;
 use std::process::exit;
 
@@ -9,10 +10,10 @@ struct Args {
     #[arg(
         short,
         long,
-        default_value_t = 5,
-        help = "Set size tolerance in MB, default is 5 MB"
+        default_value_t = String::from("5 MB"),
+        help = "Set size tolerance, default is 5 MB"
     )]
-    size: u8,
+    threshold: String,
 
     #[arg(help = "Optional commit hash to compare against")]
     commit_hash: Option<String>,
@@ -20,6 +21,13 @@ struct Args {
 
 fn main() -> Result<(), git2::Error> {
     let args = Args::parse();
+
+    let threshold =
+        parse_size(&args.threshold).map_err(|_| git2::Error::from_str("Invalid size"))?;
+
+    let threshold = threshold as f64 / 1000000.0;
+
+    println!("In main, threshold: {}", threshold);
 
     let repo = Repository::open(".")?;
 
@@ -31,7 +39,7 @@ fn main() -> Result<(), git2::Error> {
     };
     // Retrieve the commit hash from command-line arguments
 
-    if run(commit_hash, args.size).is_err() {
+    if run(commit_hash, threshold).is_err() {
         // exit code zero
         exit(1);
     } else {
@@ -39,7 +47,8 @@ fn main() -> Result<(), git2::Error> {
     }
 }
 
-fn run(oid: Oid, size: u8) -> Result<(), git2::Error> {
+fn run(oid: Oid, size: f64) -> Result<(), git2::Error> {
+    println!("In function, threshold: {}", size);
     let repo = Repository::open(".")?;
     let commit = repo.find_commit(oid)?;
 
@@ -67,7 +76,7 @@ fn run(oid: Oid, size: u8) -> Result<(), git2::Error> {
 
             let net_change = new_size - old_size;
 
-            if net_change > size as f64 {
+            if net_change > size {
                 println!("File size exceeds tolerance of {} MB", size);
                 println!("File: {:?}", file_path);
                 println!("Old Size: {} MB", old_size);
