@@ -33,9 +33,9 @@ fn main() -> Result<(), git2::Error> {
 
     if run(commit_hash, args.size).is_err() {
         // exit code zero
-        exit(0);
-    } else {
         exit(1);
+    } else {
+        exit(0);
     }
 }
 
