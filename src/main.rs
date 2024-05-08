@@ -1,6 +1,7 @@
 use clap::Parser;
 use git2::{Oid, Repository};
 use parse_size::parse_size;
+use std::ffi::CString;
 use std::path::Path;
 use std::process::exit;
 
@@ -10,8 +11,8 @@ struct Args {
     #[arg(
         short,
         long,
-        default_value_t = String::from("5 MB"),
-        help = "Set size tolerance, default is 5 MB"
+        default_value_t = String::from("100 MB"),
+        help = "Set size tolerance, default is 100 MB"
     )]
     threshold: String,
 
@@ -25,21 +26,18 @@ fn main() -> Result<(), git2::Error> {
     let threshold =
         parse_size(&args.threshold).map_err(|_| git2::Error::from_str("Invalid size"))?;
 
-    let threshold = threshold as f64 / 1000000.0;
+    let threshold = u32::try_from(threshold).map_err(|_| git2::Error::from_str("Invalid size"))?;
 
-    println!("In main, threshold: {}", threshold);
+    // let repo = Repository::open(".")?;
 
-    let repo = Repository::open(".")?;
+    // let commit_hash = if args.commit_hash.is_some() {
+    //     Oid::from_str(&args.commit_hash.unwrap())?
+    // } else {
+    //     let obj = repo.head()?.resolve()?.peel_to_commit()?;
+    //     obj.id()
+    // };
 
-    let commit_hash = if args.commit_hash.is_some() {
-        Oid::from_str(&args.commit_hash.unwrap())?
-    } else {
-        let obj = repo.head()?.resolve()?.peel_to_commit()?;
-        obj.id()
-    };
-    // Retrieve the commit hash from command-line arguments
-
-    if run(commit_hash, threshold).is_err() {
+    if check_files(threshold).is_err() {
         // exit code zero
         exit(1);
     } else {
@@ -47,8 +45,52 @@ fn main() -> Result<(), git2::Error> {
     }
 }
 
+#[derive(Debug)]
+struct LargeFile {
+    path: Vec<u8>,
+    size: u32,
+}
+
+fn check_files(threshold: u32) -> Result<(), git2::Error> {
+    let repo = Repository::open(".")?;
+
+    // Get the index (staging area)
+    let index = repo.index()?;
+
+    // Iterate over index, collect large files
+    let large_files: Vec<LargeFile> = index
+        .iter()
+        .filter(|entry| entry.file_size > threshold)
+        .map(|entry| LargeFile {
+            path: entry.path,
+            size: entry.file_size,
+        })
+        .collect();
+
+    if !large_files.is_empty() {
+        large_files.into_iter().for_each(|file| {
+            let file_size = (file.size as f64 / 10000.0).round() / 100.0;
+            let threshold = (threshold as f64 / 10000.0).round() / 100.0;
+            unsafe {
+                let file_path = CString::from_vec_unchecked(file.path)
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+
+                println!(
+                    "File {} has size {}, which is greater than the threshold {}.",
+                    file_path, file_size, threshold
+                )
+            }
+        });
+
+        return Err(git2::Error::from_str("File size exceeds tolerance"));
+    }
+
+    Ok(())
+}
+
 fn run(oid: Oid, size: f64) -> Result<(), git2::Error> {
-    println!("In function, threshold: {}", size);
     let repo = Repository::open(".")?;
     let commit = repo.find_commit(oid)?;
 
