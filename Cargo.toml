@@ -2,6 +2,7 @@
 name = "staged-size-checker"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/a2-ai-tech-training/staged-size-checker"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -10,17 +11,3 @@ edition = "2021"
 clap = { version = "4.5.4", features = ["derive"] }
 git2 = "0.18.3"
 parse-size = "1.0.0"
-
-# The profile that 'cargo dist' will build with
-[profile.dist]
-inherits = "release"
-lto = "thin"
-
-# Config for 'cargo dist'
-[workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.14.0"
-# The installers to generate for each app
-installers = []
-# Target platforms to build apps for (Rust target-triple syntax)
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
