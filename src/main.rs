@@ -79,6 +79,8 @@ fn check_files(file_tolerance: u32, staged_tolerance: u64) -> Result<(), git2::E
         })
         .collect();
 
+    let mut has_large_files = false;
+
     if !large_files.is_empty() {
         large_files.into_iter().for_each(|file| {
             let file_size = (file.size as f64 / 10000.0).round() / 100.0;
@@ -96,19 +98,31 @@ fn check_files(file_tolerance: u32, staged_tolerance: u64) -> Result<(), git2::E
             }
         });
 
-        return Err(git2::Error::from_str("File size exceeds tolerance"));
+        has_large_files = true;
     }
 
     let staged_size = index
         .iter()
         .fold(0, |acc, entry| acc + (entry.file_size as u64));
 
+    let mut staged_size_large = false;
     if staged_size > staged_tolerance {
         println!(
             "Total staged size is {} MB, which is greater than the tolerance {} MB.",
             bytes_to_mb(staged_size),
             bytes_to_mb(staged_tolerance)
         );
+
+        staged_size_large = true;
+    }
+
+    if has_large_files && staged_size_large {
+        return Err(git2::Error::from_str(
+            "File size exceeds tolerance\nTotal staged size exceeds tolerance",
+        ));
+    } else if has_large_files {
+        return Err(git2::Error::from_str("File size exceeds tolerance"));
+    } else if staged_size_large {
         return Err(git2::Error::from_str("Total staged size exceeds tolerance"));
     }
 
