@@ -26,7 +26,8 @@ fn main() -> Result<(), git2::Error> {
     let threshold =
         parse_size(&args.threshold).map_err(|_| git2::Error::from_str("Invalid size"))?;
 
-    let threshold = u32::try_from(threshold).map_err(|_| git2::Error::from_str("Invalid size"))?;
+    let threshold =
+        u32::try_from(threshold).map_err(|_| git2::Error::from_str("Could not convert to u32"))?;
 
     // let repo = Repository::open(".")?;
 
