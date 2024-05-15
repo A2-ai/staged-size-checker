@@ -4,12 +4,7 @@ Staged-size-checker is a tool designed to prevent commits with files that exceed
 
 ## Installation
 
-For now, to install you must clone the repository and run the below command:
-```shell
-cargo install --path .
-```
-
-This will install the binary to `$HOME/.cargo/bin`.
+To install the latest version, see the [Release](https://github.com/a2-ai-tech-training/staged-size-checker/releases/tag/v0.1.0) page.
 
 ### Triggering automatically
 If you want to automatically check file sizes before each commit using [Lefthook](https://github.com/evilmartians/lefthook), create a `lefthook.yaml` with the following contents:
