@@ -526,3 +526,105 @@ fn test_check_files_with_40_mb_file_add_commit_increase_40_mb_file_add() {
     let res = check_files(file_tolerance, staged_tolerance, repo_path);
     assert!(res.is_ok());
 }
+
+#[test]
+fn test_check_files_with_40_mb_file_add_commit_increase_40_mb_file_to_150_mb_add() {
+    let file_tolerance = 100_000_000;
+    let staged_tolerance = 500_000_000;
+
+    let dir = tempdir().unwrap();
+    let repo_path = dir.path();
+    Command::new("git")
+        .arg("init")
+        .current_dir(repo_path)
+        .output()
+        .unwrap();
+
+    let file_path40 = repo_path.join("40_mb_file.txt");
+    fs::write(&file_path40, vec![0; 40_000_000]).unwrap();
+
+    println!("The repo_path is {:?}", repo_path);
+
+    for entry in WalkDir::new(repo_path).into_iter().filter_map(|e| e.ok()) {
+        println!("{}", entry.path().display());
+    }
+
+    let output = Command::new("git")
+        .arg("add")
+        .arg(".")
+        .current_dir(repo_path)
+        .output()
+        .unwrap();
+
+    if output.status.success() {
+        println!("Git add successful.");
+    } else {
+        println!("Git add failed.");
+    }
+
+    let repo = Repository::open(repo_path).unwrap();
+    let index = repo.index().unwrap();
+
+    println!("index.len() = {}", index.len());
+
+    let res = check_files(file_tolerance, staged_tolerance, repo_path);
+    assert!(res.is_ok());
+
+    let output = Command::new("git")
+        .arg("commit")
+        .arg("-m")
+        .arg("commit 40mb file")
+        .current_dir(repo_path) // Set the working directory
+        .output()
+        .unwrap();
+
+    if output.status.success() {
+        println!("Git commit successful.");
+    } else {
+        println!("Git commit failed.");
+    }
+
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&file_path40)
+        .expect("Failed to open file in append mode");
+
+    let additional_data = vec![0; 110_000_000];
+
+    file.write_all(&additional_data).unwrap();
+
+    println!("the file hase {} bytes", file.metadata().unwrap().len());
+
+    //convert bytes to size in MB
+    println!(
+        "the file has size {} MB",
+        file.metadata().unwrap().len() / 1000000
+    );
+
+    println!("The repo_path is {:?}", repo_path);
+
+    for entry in WalkDir::new(repo_path).into_iter().filter_map(|e| e.ok()) {
+        println!("{}", entry.path().display());
+    }
+
+    let output = Command::new("git")
+        .arg("add")
+        .arg(".")
+        .current_dir(repo_path)
+        .output()
+        .unwrap();
+
+    if output.status.success() {
+        println!("Git add successful.");
+    } else {
+        println!("Git add failed.");
+    }
+
+    let repo = Repository::open(repo_path).unwrap();
+    let index = repo.index().unwrap();
+
+    println!("index.len() = {}", index.len());
+
+    let res = check_files(file_tolerance, staged_tolerance, repo_path);
+    assert!(res.is_err());
+}
