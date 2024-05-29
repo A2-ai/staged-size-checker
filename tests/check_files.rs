@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use walkdir::WalkDir;
 
 #[test]
-fn test_check_files_with_no_files() {
+fn test_check_files_with_no_files_git_add() {
     let file_tolerance = 100;
     let staged_tolerance = 500;
 
@@ -30,6 +30,11 @@ fn test_check_files_with_no_files() {
         .output()
         .unwrap();
 
+    let repo = Repository::open(repo_path).unwrap();
+    let index = repo.index().unwrap();
+
+    assert!(index.is_empty());
+
     let res = check_files(file_tolerance, staged_tolerance, repo_path);
 
     assert!(res.is_ok());
@@ -48,14 +53,19 @@ fn test_check_files_with_one_small_file_no_add() {
         .output()
         .unwrap();
 
-    let file_path = repo_path.join("50_file.txt");
-    fs::write(&file_path, vec![0; 49_000_000]).unwrap();
+    let file_path = repo_path.join("50_mb_file.txt");
+    fs::write(&file_path, vec![0; 50_000_000]).unwrap();
 
     println!("The repo_path is {:?}", repo_path);
 
     for entry in WalkDir::new(repo_path).into_iter().filter_map(|e| e.ok()) {
         println!("{}", entry.path().display());
     }
+
+    let repo = Repository::open(repo_path).unwrap();
+    let index = repo.index().unwrap();
+
+    assert!(index.is_empty());
 
     assert!(check_files(file_tolerance, staged_tolerance, repo_path).is_ok());
     assert!(true);
@@ -74,8 +84,8 @@ fn test_check_files_with_one_small_file_add() {
         .output()
         .unwrap();
 
-    let file_path = repo_path.join("50_file.txt");
-    fs::write(&file_path, vec![0; 49_000_000]).unwrap();
+    let file_path = repo_path.join("50_mb_file.txt");
+    fs::write(&file_path, vec![0; 50_000_000]).unwrap();
 
     println!("The repo_path is {:?}", repo_path);
 
@@ -90,11 +100,16 @@ fn test_check_files_with_one_small_file_add() {
         .output()
         .unwrap();
 
+    let repo = Repository::open(repo_path).unwrap();
+    let index = repo.index().unwrap();
+
+    assert!(index.len() == 1);
+
     assert!(check_files(file_tolerance, staged_tolerance, repo_path).is_ok());
 }
 
 #[test]
-fn test_check_files_with_one_large_file_no_add() {
+fn test_check_files_with_500_mb_file_no_add() {
     let file_tolerance = 100_000_000;
     let staged_tolerance = 500_000_000;
 
