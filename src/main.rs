@@ -1,31 +1,30 @@
 use clap::Parser;
-use git2::{Oid, Repository};
+use git2::Repository;
 use parse_size::parse_size;
-use std::ffi::CString;
-use std::path::Path;
+use std::collections::HashSet;
+use std::fs;
 use std::process::exit;
-
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
     #[arg(
         short,
         long,
-        default_value_t = String::from("100 MB"),
-        help = "Set individual file size tolerance, default is 100 MB"
+        default_value_t = String::from("100 MiB"),
+        help = "Set individual file size tolerance, default is 100 MiB"
     )]
     file_tolerance: String,
 
     #[arg(
         short,
         long,
-        default_value_t = String::from("500 MB"),
-        help = "Set commit size tolerance, default is 500 MB"
+        default_value_t = String::from("250 MiB"),
+        help = "Set commit size tolerance, default is 250 MiB"
     )]
     staged_tolerance: String,
 
-    #[arg(help = "Optional commit hash to compare against")]
-    commit_hash: Option<String>,
+    #[arg(short, long, help = "Verbose output", default_value_t = false)]
+    verbose: bool,
 }
 
 fn main() -> Result<(), git2::Error> {
@@ -36,151 +35,122 @@ fn main() -> Result<(), git2::Error> {
 
     let staged_tolerance =
         parse_size(&args.staged_tolerance).map_err(|_| git2::Error::from_str("Invalid size"))?;
+    let verbose = args.verbose;
 
-    let file_tolerance = u32::try_from(file_tolerance)
-        .map_err(|_| git2::Error::from_str("Could not convert to u32"))?;
+    let staged_size = check_files(file_tolerance, verbose)?;
+    let has_large_files = staged_size.large_files.len() > 0;
+    if has_large_files {
+        // we want to inform the user of the large files now, but not actually
+        // exit since we want to do some more checks to give the user more information
+        // on additional actions they might need to take to fully clean things up,
+        // particularly around entire staged files size
+        for file in &staged_size.large_files {
+            eprintln!("{}: {:.2} MB", file.path, bytes_to_mb(file.size));
+        }
+    }
 
-    // let repo = Repository::open(".")?;
-
-    // let commit_hash = if args.commit_hash.is_some() {
-    //     Oid::from_str(&args.commit_hash.unwrap())?
-    // } else {
-    //     let obj = repo.head()?.resolve()?.peel_to_commit()?;
-    //     obj.id()
-    // };
-
-    if check_files(file_tolerance, staged_tolerance).is_err() {
-        // exit code zero
-        exit(1);
-    } else {
+    if staged_size.total_size < staged_tolerance {
+        if has_large_files {
+            exit(100);
+        } 
+        // this is the happy path, no large files and under the limit
         exit(0);
     }
+
+    // at this point we know the staged files are over the limit
+    eprintln!(
+        "The staged files exceed the commit size tolerance of {} MB",
+        bytes_to_mb(staged_tolerance)
+    );
+    if has_large_files {
+        // both large files and over staged limit, we should check if once the large files were
+        // removed, the commit size is still over the limit so we can inform the user of that as well
+        let total_large_file_size = staged_size
+            .large_files
+            .iter()
+            .fold(0, |acc, entry| acc + entry.size);
+        if staged_size.total_size - total_large_file_size > staged_tolerance {
+            eprintln!("After removing large files, the commit size is still over the limit");
+            exit(101)
+        } else {
+            eprintln!("After removing large files, the commit size will be within the limit");
+            exit(102)
+        }
+    }
+    // no large files, just over the limit
+    exit(103);
 }
 
-#[derive(Debug)]
-struct LargeFile {
-    path: Vec<u8>,
-    size: u32,
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+struct NewFile {
+    path: String,
+    size: u64,
 }
 
-fn check_files(file_tolerance: u32, staged_tolerance: u64) -> Result<(), git2::Error> {
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+struct StagedFileStatus {
+    large_files: Vec<NewFile>,
+    total_size: u64,
+}
+
+fn check_files(file_tolerance: u64, verbose: bool) -> Result<StagedFileStatus, git2::Error> {
     let repo = Repository::open(".")?;
 
-    // Get the index (staging area)
     let index = repo.index()?;
 
-    // Iterate over index, collect large files
-    let large_files: Vec<LargeFile> = index
-        .iter()
-        .filter(|entry| entry.file_size > file_tolerance)
-        .map(|entry| LargeFile {
-            path: entry.path,
-            size: entry.file_size,
-        })
-        .collect();
+    let head_commit = repo.head()?.peel_to_commit()?;
+    let head_tree = head_commit.tree()?;
 
-    let mut has_large_files = false;
+    let diff = repo.diff_tree_to_index(Some(&head_tree), Some(&index), None)?;
+    let mut diff_files: HashSet<NewFile> = HashSet::new();
 
-    if !large_files.is_empty() {
-        large_files.into_iter().for_each(|file| {
-            let file_size = (file.size as f64 / 10000.0).round() / 100.0;
-            let threshold = (file_tolerance as f64 / 10000.0).round() / 100.0;
-            unsafe {
-                let file_path = CString::from_vec_unchecked(file.path)
-                    .to_str()
-                    .unwrap()
-                    .to_string();
-
-                println!(
-                    "File {} has size {} MB, which is greater than the tolerance {} MB.",
-                    file_path, file_size, threshold
-                )
+    let res = diff.foreach(
+        &mut |delta, _| {
+            if let Some(path) = delta.new_file().path() {
+                let path_str = path.to_string_lossy().to_string();
+                match fs::metadata(&path_str) {
+                    Ok(metadata) => {
+                        let file_size = metadata.len();
+                        if verbose {
+                            println!("Found file: {} - size: {:.2} MB", path_str, bytes_to_mb(file_size));
+                        }
+                        diff_files.insert(NewFile {
+                            path: path_str,
+                            size: file_size,
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to get metadata for file: {}. Error: {}",
+                            path_str, e
+                        );
+                    }
+                }
             }
-        });
-
-        has_large_files = true;
-    }
-
-    let staged_size = index
-        .iter()
-        .fold(0, |acc, entry| acc + (entry.file_size as u64));
-
-    let mut staged_size_large = false;
-    if staged_size > staged_tolerance {
-        println!(
-            "Total staged size is {} MB, which is greater than the tolerance {} MB.",
-            bytes_to_mb(staged_size),
-            bytes_to_mb(staged_tolerance)
-        );
-
-        staged_size_large = true;
-    }
-
-    if has_large_files && staged_size_large {
-        return Err(git2::Error::from_str(
-            "File size exceeds tolerance\nTotal staged size exceeds tolerance",
-        ));
-    } else if has_large_files {
-        return Err(git2::Error::from_str("File size exceeds tolerance"));
-    } else if staged_size_large {
-        return Err(git2::Error::from_str("Total staged size exceeds tolerance"));
-    }
-
-    Ok(())
-}
-
-fn bytes_to_mb(bytes: u64) -> f64 {
-    (bytes as f64 / 10000.0).round() / 100.0
-}
-
-fn run(oid: Oid, size: f64) -> Result<(), git2::Error> {
-    let repo = Repository::open(".")?;
-    let commit = repo.find_commit(oid)?;
-
-    // Find the commit specified by the hash
-    let tree = commit.tree()?;
-
-    // Get the index (staging area)
-    let index = repo.index()?;
-
-    // Compare the index against the specified commit's tree
-    let diff = repo.diff_tree_to_index(Some(&tree), Some(&index), None)?;
-
-    let mut flag = true;
-
-    // Iterate over differences
-    diff.foreach(
-        &mut |delta, _progress| {
-            let file_path = match delta.new_file().path() {
-                Some(path) => path,
-                None => Path::new(""),
-            };
-
-            let new_size: f64 = (delta.new_file().size() as f64 / 10000.0).round() / 100.0;
-            let old_size: f64 = (delta.old_file().size() as f64 / 10000.0).round() / 100.0;
-
-            let net_change = new_size - old_size;
-
-            if net_change > size {
-                println!("File size exceeds tolerance of {} MB", size);
-                println!("File: {:?}", file_path);
-                println!("Old Size: {} MB", old_size);
-                println!("New Size: {} MB", new_size);
-                println!("Net Change: {} MB", net_change);
-                flag = false;
-            }
-
-            // You can implement additional logic to compare sizes or other attributes here
             true
         },
         None,
         None,
         None,
-    )?;
-
-    if !flag {
-        return Err(git2::Error::from_str("File size exceeds tolerance"));
+    );
+    if !res.is_ok() {
+        dbg!(res.err());
+        return Err(git2::Error::from_str("Error while iterating over diff"));
     }
 
-    Ok(())
+    let large_files: Vec<NewFile> = diff_files
+        .iter()
+        .filter(|file| file.size > file_tolerance)
+        .cloned()
+        .collect();
+    let total_size = diff_files.iter().fold(0, |acc, entry| acc + entry.size);
+
+    Ok(StagedFileStatus {
+        large_files,
+        total_size,
+    })
+}
+
+fn bytes_to_mb(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
 }
