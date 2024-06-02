@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "staged-size-checker"
-version = "0.1.0"
+version = "0.2.0-rc1"
 dependencies = [
  "clap",
  "git2",

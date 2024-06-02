@@ -1,6 +1,6 @@
 [package]
 name = "staged-size-checker"
-version = "0.1.0"
+version = "0.2.0-rc1"
 edition = "2021"
 repository = "https://github.com/a2-ai-tech-training/staged-size-checker"
 
