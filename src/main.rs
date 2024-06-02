@@ -2,7 +2,8 @@ use clap::Parser;
 use git2::Repository;
 use parse_size::parse_size;
 use std::collections::HashSet;
-use std::fs;
+use humansize::{format_size, DECIMAL};
+
 use std::process::exit;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -45,7 +46,7 @@ fn main() -> Result<(), git2::Error> {
         // on additional actions they might need to take to fully clean things up,
         // particularly around entire staged files size
         for file in &staged_size.large_files {
-            eprintln!("{}: {:.2} MB", file.path, bytes_to_mb(file.size));
+            eprintln!("{}: {}", file.path, format_size(file.size, DECIMAL));
         }
     }
 
@@ -59,8 +60,8 @@ fn main() -> Result<(), git2::Error> {
 
     // at this point we know the staged files are over the limit
     eprintln!(
-        "The staged files exceed the commit size tolerance of {} MB",
-        bytes_to_mb(staged_tolerance)
+        "The staged files exceed the commit size tolerance of {}",
+        &args.file_tolerance
     );
     if has_large_files {
         // both large files and over staged limit, we should check if once the large files were
@@ -69,11 +70,16 @@ fn main() -> Result<(), git2::Error> {
             .large_files
             .iter()
             .fold(0, |acc, entry| acc + entry.size);
-        if staged_size.total_size - total_large_file_size > staged_tolerance {
-            eprintln!("After removing large files, the commit size is still over the limit");
+        let removed_total_size = staged_size.total_size - total_large_file_size;
+        if removed_total_size > staged_tolerance {
+            eprintln!("After removing large files, the commit size {} is still over the limit of {}",
+                      format_size(removed_total_size, DECIMAL),
+                      &args.staged_tolerance);
             exit(101)
         } else {
-            eprintln!("After removing large files, the commit size will be within the limit");
+            eprintln!("After removing large files, the commit size {} will be within limit of {}",
+                      format_size(removed_total_size, DECIMAL),
+                      &args.staged_tolerance);
             exit(102)
         }
     }
@@ -93,6 +99,10 @@ struct StagedFileStatus {
     total_size: u64,
 }
 
+/// check_files will check the files staged for commit and return a Vector of files and their size
+/// that are over the file_tolerance size. 
+/// It will also return the total size of all the files staged for commit that
+/// can be used to check if the total size is over the staged_tolerance size.
 fn check_files(file_tolerance: u64, verbose: bool) -> Result<StagedFileStatus, git2::Error> {
     let repo = Repository::open(".")?;
 
@@ -102,30 +112,28 @@ fn check_files(file_tolerance: u64, verbose: bool) -> Result<StagedFileStatus, g
     let head_tree = head_commit.tree()?;
 
     let diff = repo.diff_tree_to_index(Some(&head_tree), Some(&index), None)?;
+
+    // we'll use this to collect the files from the diff. It's a little unclear if the diffs
+    // are unique to the file or if they could be chunks of the same file where we end up
+    // hitting the same file in the callback multiple times. We'll use a HashSet to ensure
+    // we only get unique files
     let mut diff_files: HashSet<NewFile> = HashSet::new();
 
+    // diff can't be turned into an iterator, so we have to use foreach
+    // and collect the results ourselves
     let res = diff.foreach(
         &mut |delta, _| {
+            let file = delta.new_file();
             if let Some(path) = delta.new_file().path() {
                 let path_str = path.to_string_lossy().to_string();
-                match fs::metadata(&path_str) {
-                    Ok(metadata) => {
-                        let file_size = metadata.len();
-                        if verbose {
-                            println!("Found file: {} - size: {:.2} MB", path_str, bytes_to_mb(file_size));
-                        }
-                        diff_files.insert(NewFile {
-                            path: path_str,
-                            size: file_size,
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "Failed to get metadata for file: {}. Error: {}",
-                            path_str, e
-                        );
-                    }
+                let size = file.size();
+                if verbose {
+                    println!("{}: {}", path_str, format_size(size, DECIMAL));
                 }
+                diff_files.insert(NewFile {
+                    path: path_str,
+                    size: file.size(),
+                });
             }
             true
         },
@@ -133,6 +141,9 @@ fn check_files(file_tolerance: u64, verbose: bool) -> Result<StagedFileStatus, g
         None,
         None,
     );
+
+    // I'm not sure of a case where this could fail, so lets also dump the error out
+    // so if someone reports this we can see what the error was
     if !res.is_ok() {
         dbg!(res.err());
         return Err(git2::Error::from_str("Error while iterating over diff"));
@@ -149,8 +160,4 @@ fn check_files(file_tolerance: u64, verbose: bool) -> Result<StagedFileStatus, g
         large_files,
         total_size,
     })
-}
-
-fn bytes_to_mb(bytes: u64) -> f64 {
-    bytes as f64 / (1024.0 * 1024.0)
 }
