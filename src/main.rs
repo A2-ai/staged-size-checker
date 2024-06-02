@@ -1,6 +1,6 @@
 use clap::Parser;
 use git2::Repository;
-use parse_size::parse_size;
+use parse_size::Config;
 use std::collections::HashSet;
 use humansize::{format_size, DECIMAL};
 
@@ -31,11 +31,21 @@ struct Args {
 fn main() -> Result<(), git2::Error> {
     let args = Args::parse();
 
+    // if someone puts just a number it likely will be in MB, we'll use that as the default
+    // we'll also force everything to be binary as almost all people are likely thinking
+    // in terms of binary sizes. Binary is like 100 MB which is actually 104857600 bytes
+    // so now if someone sets the file_tolerance to 100 it'll be 100MB, but
+    // if they still type 1GB that'll still parse ok.
+    // one thing this does lose, if someone is truly specific, eg types 1 GiB, it'll always
+    // coerce to binary as exists. We could add a flag to control this if
+    // it ever comes up in real life as a feature request.
+    let cfg = Config::new().with_binary().with_default_factor(1_048_576);
+
     let file_tolerance =
-        parse_size(&args.file_tolerance).map_err(|_| git2::Error::from_str("Invalid size"))?;
+        cfg.parse_size(&args.file_tolerance).map_err(|_| git2::Error::from_str("Invalid size"))?;
 
     let staged_tolerance =
-        parse_size(&args.staged_tolerance).map_err(|_| git2::Error::from_str("Invalid size"))?;
+        cfg.parse_size(&args.staged_tolerance).map_err(|_| git2::Error::from_str("Invalid size"))?;
     let verbose = args.verbose;
 
     let staged_size = check_files(file_tolerance, verbose)?;
