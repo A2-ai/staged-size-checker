@@ -1,8 +1,8 @@
 [package]
 name = "staged-size-checker"
-version = "0.2.0-rc1"
+version = "0.2.0-rc2"
 edition = "2021"
-repository = "https://github.com/a2-ai-tech-training/staged-size-checker"
+repository = "https://github.com/a2-ai/staged-size-checker"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,13 +21,13 @@ lto = "thin"
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.14.0"
+cargo-dist-version = "0.15.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
 installers = ["shell"]
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = ["x86_64-unknown-linux-gnu"]
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 # Publish jobs to run in CI
 pr-run-mode = "plan"
 # Whether to install an updater program
